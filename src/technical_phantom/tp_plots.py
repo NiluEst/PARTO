@@ -33,6 +33,7 @@ import matplotlib.patheffects as pe
 from matplotlib.lines import Line2D
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import savgol_filter
+from scipy.interpolate import PchipInterpolator
 
 from tp_config import (INSERT_NAMES, HU_ACCURACY_LIMITS, UNIFORMITY_TOLERANCE_PCT,
                        UNIFORMITY_POSITIONS_DEG, RESULTS_DIR, PLOTS_DIR)
@@ -213,10 +214,14 @@ def _smooth_curve_for_plot(x_values, y_values, *, points=400, sigma=2.0, sigma_m
     return x_dense, y_dense
 
 
+
+
 def _smooth_mtf(fr, mtf, label_text=""):
-    """Display smoothing for MTF curves (Gaussian; stronger for the Br98 kernel)."""
-    sig = 3.0 if "br98" in str(label_text).lower() else 2.0
-    return _smooth_curve_for_plot(fr, mtf, points=500, sigma=sig, anchor_start=True)
+    """monotone cubic interpolation"""
+    x = np.r_[0.0, np.asarray(fr, float)]
+    y = np.r_[1.0, np.asarray(mtf, float)]
+    xd = np.linspace(0.0, x.max(), 500)
+    return xd, PchipInterpolator(x, y)(xd)
 
 
 def _smooth_nps(fr, nps):
@@ -612,7 +617,7 @@ def _draw_kernel_curves(ax, results, x_key, y_key, smooth, ylabel, xlabel, ylim)
 def _draw_kernel_mtf(ax, results):
     _draw_kernel_curves(ax, results, "mtf_fr_lp_mm", "mtf_curve",
                         lambda r: _smooth_mtf(r["mtf_fr_lp_mm"], r["mtf_curve"], r.get("label", "")),
-                        "MTF", "Spatial Frequency (lp/mm)", (0, 1.05))
+                        "MTF", "Spatial Frequency (lp/mm)", (0, 1.5))
 
 
 def _draw_kernel_nps(ax, results):

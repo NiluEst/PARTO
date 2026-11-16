@@ -233,3 +233,11 @@ DICOM_*.xlsx
 src/Results/
 src/pediatric_phantom/roi_selection_cache.json
 
+# DICOM-Header-Check (temporär)
+src/technical_phantom/check_dicom_headers.py
+output_data/dicom_header_check.csv
+output_data/header_full_*.txt
+
+# einmaliges Druck-Script + Ausgabe
+roi_print_figures.py
+roi_print_figures/

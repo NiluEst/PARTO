@@ -197,8 +197,8 @@ class PhantomAnalysis:
             mask = (FR >= fr_bins[i]) & (FR < fr_bins[i + 1])
             if np.any(mask):
                 mtf_r[i] = np.mean(mtf2d[mask]); fr_r[i] = 0.5 * (fr_bins[i] + fr_bins[i + 1])
-        mtf_r /= (mtf_r[0] + 1e-12)
-        mtf_r = np.clip(mtf_r, 0, 1)
+        dc = mtf2d[mtf2d.shape[0] // 2, mtf2d.shape[1] // 2]   # Wert bei f = 0 (nach fftshift)
+        mtf_r /= dc
         valid = np.isfinite(mtf_r)
         fr_out, mtf_out = fr_r[valid], mtf_r[valid]
         return {"fr_lp_mm": fr_out, "mtf": mtf_out,
