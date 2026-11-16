@@ -1,5 +1,7 @@
 # PARTO: Phantom Analysis of Resolution, Texture & dOse
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24276574.svg)](https://doi.org/10.5281/zenodo.24276574)
+
 Analysis code of a master's thesis that compares a **photon-counting CT** (PCCT, Siemens NAEOTOM Alpha)
 with **energy-integrating CTs** (EICT, Siemens SOMATOM X.cite and SOMATOM go.Top) using phantom scans.
 
