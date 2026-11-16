@@ -75,12 +75,15 @@ class DicomLoader:
         ``scanner_type`` is "PCCT" if the model name contains "alpha" (NAEOTOM
         Alpha), "EID" for X.cite (energy-integrating detector), otherwise
         "unknown". Returns a dict with ``scanner_type``, ``scanner_model_name``
-        (lower case), ``ctdivol_mgy`` (CTDIvol in mGy) and ``kernel``.
+        (lower case), ``ctdivol_mgy`` (CTDIvol in mGy), ``kernel`` and the
+        geometry fields ``table_height_mm``, ``image_position``, ``recon_center``,
+        ``dcc_center`` (None if missing).
         """
-        files =[f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
+        files = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
         if not files:
             return {"scanner_type": "unknown", "scanner_model_name": None,
-                    "ctdivol_mgy": None, "kernel": "Unknown"}
+                    "ctdivol_mgy": None, "kernel": "Unknown", "table_height_mm": None,
+                    "image_position": None, "recon_center": None, "dcc_center": None}
         ds = pydicom.dcmread(os.path.join(folder, sorted(files)[0]), stop_before_pixels=True)
         model = str(getattr(ds, "ManufacturerModelName", "")).lower()
         if "alpha" in model:
@@ -92,8 +95,18 @@ class DicomLoader:
         ctdi = getattr(ds, "CTDIvol", None)
         kernel = str(getattr(ds, "ConvolutionKernel",
                              getattr(ds, "ReconstructionKernel", "Unknown")))
+
+        def _vec(tag):
+            v = ds.get(tag)
+            return [float(x) for x in v] if v is not None else None
+
+        th = ds.get("TableHeight")
         return {"scanner_type": scanner_type, "scanner_model_name": model or None,
-                "ctdivol_mgy": float(ctdi) if ctdi is not None else None, "kernel": kernel}
+                "ctdivol_mgy": float(ctdi) if ctdi is not None else None, "kernel": kernel,
+                "table_height_mm": float(th) if th is not None else None,
+                "image_position": _vec("ImagePositionPatient"),
+                "recon_center": _vec("ReconstructionTargetCenterPatient"),
+                "dcc_center": _vec("DataCollectionCenterPatient")}
 
 
 # ══════════════════════════════════════════════════════════════════

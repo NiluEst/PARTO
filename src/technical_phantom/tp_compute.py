@@ -293,9 +293,19 @@ class QAPipeline:
                         initial_window=(WIRE_PHANTOM_WL, WIRE_PHANTOM_WW) if is_wire_phantom else win486)
                     self.cache.save_fields(sig, {"nps_region": {"x": ncx, "y": ncy, "radius_mm": nr}})
 
+
+        # ── Phantom position relative to isocentre ──
+        phantom_offset = None
+        ipp = scanner.get("image_position")
+        if ipp:
+            pcx, pcy, _ = Geometry.phantom_center(images[slices["ctp486_1"]])
+            phantom_offset = {"x": ipp[0] + pcx * spacing[1], "y": ipp[1] + pcy * spacing[0]}
+            self.cache.save_fields(sig, {"phantom_offset_mm": phantom_offset})
+            print(f"Phantom offset: x={phantom_offset['x']:+.1f} mm, y={phantom_offset['y']:+.1f} mm | "
+                  f"TableHeight={scanner.get('table_height_mm')} | ReconCenter={scanner.get('recon_center')}")
+
         ctp404 = images[slices["ctp404"]]
         r_px = self.analysis.roi_radius_px(spacing)
-
         # ── Low-contrast ROIs (CTP515) ────────────────────────────
         low_contrast_rois = None
         if do_dprime_lowcontrast and "ctp515" in slices:
@@ -679,8 +689,9 @@ class QAPipeline:
             "ctdivol_mgy": scanner["ctdivol_mgy"],
             "uniformity_by_position": uniformity_by_position,
             "uniformity_center_hu": results.get("uniformity", {}).get("center_hu"),
+            "phantom_offset_mm": phantom_offset,
+            "table_height_mm": scanner.get("table_height_mm"),
         }
-
     def run_compare(self, folder_1, folder_2, label_1, label_2, selection, review=False):
         """Mode 2: analyse two datasets and queue comparison plots (NPS, MTF + ΔMTF, CNR,
         HU accuracy, uniformity); the results of both are exported to CSV."""
@@ -890,7 +901,8 @@ class QAPipeline:
 
         Datasets without CTDIvol are skipped. Queues dose plots (CNR, HU accuracy, uniformity,
         uniformity centre HU, ΥNPS, d' per material) where at least two results exist, exports
-        the batch CSV and a separate edge-diagnostics CSV, and returns the per-dataset results.
+        the batch CSV (incl. phantom offset / table height) and a separate edge-diagnostics CSV,
+        and returns the per-dataset results.
         """
         results = []
         for ds in dataset_list:
@@ -949,7 +961,7 @@ class QAPipeline:
                 else:
                     print(f"Too few results for {material} plot.")
 
-        # CSV export: CNR, NPS, MTF, d' + TTF50 + HU accuracy + uniformity together
+        # CSV export: CNR, NPS, MTF, d' + TTF50 + HU accuracy + uniformity + phantom position
         batch_export = [{"dataset": r["label"], "path": r["dicom_folder"],
                         "scanner_type": r["scanner_type"], "ctdivol": r["ctdivol_mgy"],
                         "nps": r["upsilon_nps"], "mtf50": r["mtf50_lp_mm"], "mtf10": r["mtf10_lp_mm"],
@@ -959,6 +971,8 @@ class QAPipeline:
                         "ct_numbers": r.get("ct_numbers"),
                         "uniformity": r.get("uniformity_by_position"),
                         "uniformity_center_hu": r.get("uniformity_center_hu"),
+                        "phantom_offset": r.get("phantom_offset_mm"),
+                        "table_height": r.get("table_height_mm"),
                         }
                        for r in results
                        if r.get("cnr_by_material") or r.get("dprime_by_material") or r.get("ct_numbers")]

@@ -115,8 +115,9 @@ def _export_batch_results_to_csv(batch_data):
 
     ``batch_data`` is a list of dicts (keys ``dataset``, ``path``,
     ``scanner_type``, ``ctdivol``, ``nps``, ``mtf50``, ``mtf10`` and the per-material
-    dicts ``cnr``, ``dprime``, ``ttf50``, ``ct_numbers``, plus ``uniformity``
-    and ``uniformity_center_hu``). Columns for materials/positions are the union
+    dicts ``cnr``, ``dprime``, ``ttf50``, ``ct_numbers``, plus ``uniformity``,
+    ``uniformity_center_hu`` and optionally ``phantom_offset`` ({x, y} in mm) and
+    ``table_height`` (mm)). Columns for materials/positions are the union
     over all datasets; missing values are left empty.
     HU accuracy is PASS if lower <= HU <= upper of ``HU_ACCURACY_LIMITS``
     (deviation = HU - baseline); uniformity is PASS if |U_i| <=
@@ -145,6 +146,8 @@ def _export_batch_results_to_csv(batch_data):
                 header += [f"Uniformity_{p} (%)", f"Uniformity_{p}_pass"]
             if all_u_positions:
                 header += ["Uniformity_center_HU", "Uniformity_all_pass"]
+            # Phantom position relative to isocentre + table height
+            header += ["Offset_x_mm", "Offset_y_mm", "TableHeight_mm"]
 
             writer.writerow(header)
             for e in batch_data:
@@ -201,6 +204,10 @@ def _export_batch_results_to_csv(batch_data):
                     c = e.get("uniformity_center_hu")
                     row.append(f"{c:.2f}" if c is not None else "")
                     row.append("PASS" if (all_pass and u) else ("FAIL" if u else ""))
+                # Phantom position
+                off, th = e.get("phantom_offset") or {}, e.get("table_height")
+                row += [f"{off['x']:+.2f}" if off else "", f"{off['y']:+.2f}" if off else "",
+                        f"{th:.1f}" if th is not None else ""]
 
                 writer.writerow(row)
         print(f"CSV exported to: {csv_path}")
