@@ -1,5 +1,4 @@
 # PARTO: Phantom Analysis of Resolution, Texture & dOse
-# Image quality and dose: photon-counting CT vs. energy-integrating CT in paediatric abdominal imaging
 
 Analysis code of a master's thesis that compares a **photon-counting CT** (PCCT, Siemens NAEOTOM Alpha)
 with **energy-integrating CTs** (EICT, Siemens SOMATOM X.cite and SOMATOM go.Top) using phantom scans.
