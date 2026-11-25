@@ -186,6 +186,8 @@ def _draw_pairwise_bars(ax, d, cat_key, cat_title, variability=False):
     color2 = d.get("color2") or COLOR_2
     w = Config.BAR_WIDTH
     x = np.arange(len(d["matches"]))
+    inv = next((c.get("ratio_invert", False) for c in Config.COMPARISONS
+            if c["title"] == d.get("comp_title")), False)
     v1, v2, e1, e2, ratios, labels, ns = [], [], [], [], [], [], []
     for ctdi_disp, k1, k2 in d["matches"]:
         if variability:
@@ -197,7 +199,10 @@ def _draw_pairwise_bars(ax, d, cat_key, cat_title, variability=False):
             a2 = _avg(d["map2"].get(k2, {}).get(cat_key, []))
             s1 = s2 = 0.0
         v1.append(a1); v2.append(a2); e1.append(s1 or 0.0); e2.append(s2 or 0.0)
-        ratios.append((a1 / a2) if (a1 is not None and a2) else None)
+        if a1 is None or a2 is None or not (a2 if not inv else a1):
+            ratios.append(None)
+        else:
+            ratios.append(a2 / a1 if inv else a1 / a2)
         labels.append(f"{ctdi_disp:.2f}")
     err = dict(ecolor="black", elinewidth=1.1, capthick=1.1, capsize=3)
     ax.bar(x - w / 2, [v or 0 for v in v1], width=w, label=d["label1"], color=color1,

@@ -112,6 +112,7 @@ class Config:
             "title":  "Slice Thickness: 1 mm vs. 3 mm",
             "column": "slice_thickness_mm", "val1": "1.0", "val2": "3.0",
             "label1": "1 mm", "label2": "3 mm",
+            "ratio_invert": True,         
             "fixed_filters": {"kvp": "70", "kernel": "br40"},
             "fixed_filter_modes": {"kernel": "kernel_prefix"},
         },
@@ -138,6 +139,8 @@ class Config:
             "label1": "Same FOV", "label2": "Different FOV",
             "color1": "#D64550", "color2": "#2E9E4D",
         },
+
+
     ]
 
     # Three-way scanner comparison; "match" is matched against the
