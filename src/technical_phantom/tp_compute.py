@@ -40,7 +40,7 @@ import tp_plots
 import tp_plotdata as plotdata
 from tp_config import (INSERT_NAMES, NOMINAL_HU, INSERT_DIAMETER_MM, DPRIME_TTF_MATERIALS,
                        UNIFORMITY_POSITIONS_DEG, UNIFORMITY_ROI_RADIUS_MM,
-                       WIRE_PHANTOM_WL, WIRE_PHANTOM_WW, RESULTS_DIR)
+                       WIRE_PHANTOM_WL, WIRE_PHANTOM_WW, RESULTS_DIR, CNR_GROUPS)
 from tp_helpers import (_norm_method, _mtf_level, _ask_yes_no, _ask_label, _ask_slice_index,
                         _safe_tag, _ask_analysis_selection, _sel_kwargs)
 from tp_dicom import DicomLoader, SliceFinder, Geometry, ReferenceTemplateManager, CacheManager, _shift_points
@@ -899,8 +899,9 @@ class QAPipeline:
                         dprime_diameter_mm=INSERT_DIAMETER_MM):
         """Mode 4: analyse datasets acquired at different doses and group the results by CTDIvol.
 
-        Datasets without CTDIvol are skipped. Queues dose plots (CNR, HU accuracy, uniformity,
-        uniformity centre HU, ΥNPS, d' per material) where at least two results exist, exports
+        Datasets without CTDIvol are skipped. Queues dose plots (CNR: mean, per insert and per contrast
+        group; HU accuracy, uniformity, uniformity centre HU, ΥNPS, d' per material) where at least two
+        results exist, exports
         the batch CSV (incl. phantom offset / table height) and a separate edge-diagnostics CSV,
         and returns the per-dataset results.
         """
@@ -924,6 +925,17 @@ class QAPipeline:
             g = plotdata.cnr_dose(valid) if len(valid) >= 2 else None
             if g:
                 self._queue("cnr_dose", g=g)
+                # Additionally: CNR per insert and per contrast group (CNR_GROUPS), because the mean
+                # over all inserts is dominated by the high-contrast inserts. Queued AFTER the mean,
+                # so that the first "cnr_dose" entry stays the mean (used by the multi-panel figure).
+                for material in INSERT_NAMES:
+                    g_m = plotdata.cnr_dose(valid, material_subset=[material])
+                    if g_m:
+                        self._queue("cnr_dose", g=g_m, label=material)
+                for group, mats in CNR_GROUPS.items():
+                    g_m = plotdata.cnr_dose(valid, material_subset=mats)
+                    if g_m:
+                        self._queue("cnr_dose", g=g_m, label=group, materials=mats)
             else:
                 print("Too few CNR results for dose plot.")
             valid_hu = [r for r in results if r.get("ct_numbers")]

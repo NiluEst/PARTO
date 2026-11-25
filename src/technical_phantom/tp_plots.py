@@ -31,12 +31,13 @@ from matplotlib.figure import Figure
 import matplotlib.patches as patches
 import matplotlib.patheffects as pe
 from matplotlib.lines import Line2D
+from matplotlib.ticker import FixedLocator, NullLocator
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import savgol_filter
 from scipy.interpolate import PchipInterpolator
 
 from tp_config import (INSERT_NAMES, HU_ACCURACY_LIMITS, UNIFORMITY_TOLERANCE_PCT,
-                       UNIFORMITY_POSITIONS_DEG, RESULTS_DIR, PLOTS_DIR)
+                       UNIFORMITY_POSITIONS_DEG, RESULTS_DIR, PLOTS_DIR, CNR_GROUPS)
 from tp_helpers import _mtf_level, _kernel_group, _window_limits
 
 # ── Global settings ────────────────────────────────────────────────
@@ -710,41 +711,101 @@ def plot_linepair_profiles(entries):
 # ══════════════════════════════════════════════════════════════════
 # DOSE SERIES (mode 4)
 # ══════════════════════════════════════════════════════════════════
-# The dose plots receive a dict `g` with "doses" (CTDIvol in mGy per group) and one value per dose
-# group for "PCCT" and "EID".
-def _draw_dose_bars(ax, g, ylabel, legend_suffix, title="", ylim_factor=None, headroom=1.6):
-    """PCCT/EICT bar pair per CTDIvol group with ratio bracket (PCCT / EICT).
+# The dose plots receive a dict `g` with "doses" (mean CTDIvol in mGy per dose group), one value per
+# dose group for "PCCT" and "EID" and the achieved CTDIvol of each scanner per group in
+# "dose_PCCT" / "dose_EID" (see tp_plotdata.dose_groups).
+def _draw_dose_lines(ax, g, ylabel, legend_suffix, title="", ylim_factor=None, headroom=1.6,
+                     ratio=True, zero_floor=True, legend_loc="upper left"):
+    """PCCT vs. EICT per dose group as line plot, each scanner at its achieved CTDIvol.
 
+    x = achieved CTDIvol of each scanner ("dose_PCCT" / "dose_EID"; if these keys are missing, the
+    group mean "doses" is used for both scanners), with the group means as tick labels. The axis is
+    linear for a narrow dose range (max/min <= 5) and logarithmic otherwise (same rule as in
+    pp_plots). A light grey band marks which CTDIvol values of PCCT and EICT form one dose group.
+    ratio: red ratio label (PCCT / EICT) above each dose group.
     ylim_factor: if given, y-axis = 0 … max value x ylim_factor; otherwise extend the top by `headroom`.
+    zero_floor: y-axis starts at 0 (CNR, d'); False keeps the automatic lower limit (HU, U_i, ΥNPS).
     """
-    x = np.arange(len(g["doses"]), dtype=float); w = 0.3
-    _paired_bars(ax, x, g["PCCT"], g["EID"], w, (f"PCCT {legend_suffix}", f"EICT {legend_suffix}"),
-                 ("tab:orange", "tab:blue"))
-    ax.set_xticks(x); ax.set_xticklabels([f"{c:.2f}" for c in g["doses"]], rotation=25, ha="right")
+    doses = np.asarray(g["doses"], float)
+    xs = {}
+    for stype in ("PCCT", "EID"):
+        x = np.asarray(g.get(f"dose_{stype}", doses), float)
+        xs[stype] = np.where(np.isfinite(x), x, doses)
+    log_x = doses.max() / doses.min() > 5.0
+    span = doses.max() - doses.min()
+    for i in range(len(doses)):                     # grey band = one dose group (lowest to highest CTDIvol)
+        lo, hi = min(xs["PCCT"][i], xs["EID"][i]), max(xs["PCCT"][i], xs["EID"][i])
+        if log_x:
+            ax.axvspan(lo / 1.04, hi * 1.04, color="0.92", lw=0, zorder=0)
+        else:
+            ax.axvspan(lo - 0.015 * span, hi + 0.015 * span, color="0.92", lw=0, zorder=0)
+    for stype, marker in (("PCCT", "o"), ("EID", "s")):
+        y = np.asarray(g[stype], float)
+        ok = np.isfinite(y)
+        ax.plot(xs[stype][ok], y[ok], linestyle=FAMILY[stype]["linestyle"], marker=marker, markersize=5,
+                color=FAMILY[stype]["color"], zorder=4, label=f"{FAMILY[stype]['label']} {legend_suffix}".strip())
+    xlim = (doses.min() / 1.25, doses.max() * 1.25) if log_x else (doses.min() - 0.1 * span,
+                                                                   doses.max() + 0.1 * span)
+    if ratio:
+        # a label closer than 0.1 (axes fraction) to the previous, not shifted label is placed higher,
+        # so that neighbouring labels never overlap
+        tr = np.log10 if log_x else (lambda v: v)
+        fr = [(tr(d) - tr(xlim[0])) / (tr(xlim[1]) - tr(xlim[0])) for d in doses]
+        shifted = [False] * len(doses)
+        for i in range(1, len(doses)):
+            shifted[i] = (fr[i] - fr[i - 1] < 0.1) and not shifted[i - 1]
+        for i, (d, p, e) in enumerate(zip(doses, g["PCCT"], g["EID"])):
+            if np.isfinite(p) and np.isfinite(e) and e != 0.0:
+                ax.annotate(f"×{p / e:.2f}", xy=(d, max(p, e)), xytext=(0, 19 if shifted[i] else 6),
+                            textcoords="offset points", ha="center", va="bottom", color="red",
+                            fontweight="bold", zorder=5)
+    if log_x:
+        ax.set_xscale("log")
+    ax.set_xlim(*xlim)
+    ax.xaxis.set_major_locator(FixedLocator(doses))
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.set_xticklabels([f"{c:.2f}" for c in doses], rotation=45, ha="right")
     ax.set_xlabel("CTDIvol (mGy)"); ax.set_ylabel(ylabel); ax.set_title(title)
     if ylim_factor:
         ax.set_ylim(0, max(np.nanmax(g["PCCT"]), np.nanmax(g["EID"])) * ylim_factor)
     else:
+        if zero_floor:
+            ax.set_ylim(bottom=0)
         yl = ax.get_ylim(); ax.set_ylim(yl[0], yl[0] + (yl[1] - yl[0]) * headroom)
-    ax.legend(loc="upper right", bbox_to_anchor=(0.99, 0.99), borderaxespad=0.6, framealpha=0.9)
+    ax.legend(loc=legend_loc, borderaxespad=0.6, framealpha=0.9)
     ax.grid(axis="y", alpha=0.3)
 
 
-def _draw_cnr_dose(ax, g):
-    _draw_dose_bars(ax, g, "Mean CNR across materials", "(mean CNR)", "CNR vs. Dose: PCCT vs. EICT")
+def _draw_cnr_dose(ax, g, label=None, materials=None):
+    """CNR vs. dose. label=None: mean over all inserts; label = insert name: CNR of that insert;
+    label = key of CNR_GROUPS: mean CNR of the inserts of that contrast group."""
+    if label is None:
+        _draw_dose_lines(ax, g, "Mean CNR across materials", "(mean CNR)", "CNR vs. Dose: PCCT vs. EICT")
+    elif label in CNR_GROUPS:
+        mats = materials or CNR_GROUPS[label]
+        _draw_dose_lines(ax, g, f"Mean CNR ({label.lower()} contrast)", "",
+                        f"{label}-contrast inserts: {', '.join(mats)}")
+    else:
+        _draw_dose_lines(ax, g, f"CNR ({label})", "", f"CNR {label} vs. Dose")
 
 
 def _draw_dprime_dose(ax, g, material, diameter_mm=None):
     title = f"PCCT vs EICT: d' ({material}) per CTDIvol"
     if diameter_mm is not None:
         title += f" (Ø={diameter_mm:.1f} mm)"
-    _draw_dose_bars(ax, g, "Detectability index d'", "(d')", title, ylim_factor=1.75)
+    _draw_dose_lines(ax, g, "Detectability index d'", "(d')", title, ylim_factor=1.75)
 
 
-def plot_cnr_dose(g):
+def plot_cnr_dose(g, label=None, materials=None):
+    """Single CNR dose plot: dose_CNR_mean.svg (label=None), dose_CNR_<insert>.svg or dose_CNR_group_<group>.svg."""
     fig, ax = _new_fig()
-    _draw_cnr_dose(ax, g)
-    _save(fig, "dose", "CNR_mean")
+    _draw_cnr_dose(ax, g, label, materials)
+    if label is None:
+        _save(fig, "dose", "CNR_mean")
+    elif label in CNR_GROUPS:
+        _save(fig, "dose", "CNR_group", label)
+    else:
+        _save(fig, "dose", "CNR", label)
 
 
 def plot_dprime_dose(g, material, diameter_mm=None):
@@ -760,11 +821,10 @@ def plot_hu_dose(by_material):
         fig, ax = _new_fig()
         ax.axhspan(lim["lower"], lim["upper"], color="gray", alpha=0.15, label="Acceptable range")
         ax.axhline(lim["baseline"], color="black", ls="--", lw=1.0, label="Reference baseline")
-        ax.plot(g["doses"], g["PCCT"], "o-", color="tab:orange", markersize=5, label="PCCT")
-        ax.plot(g["doses"], g["EID"], "s-", color="tab:blue", markersize=5, label="EICT")
-        ax.set_title(name); ax.set_xlabel("CTDIvol (mGy)"); ax.set_ylabel("HU")
+        # same line style / true CTDIvol axis as all other dose plots (no ratio for CT numbers)
+        _draw_dose_lines(ax, g, "HU", "", name, headroom=1.3, ratio=False, zero_floor=False,
+                        legend_loc="upper right")
         ax.grid(alpha=0.3)
-        _style_legend(ax, headroom=1.3)
         _save(fig, "dose", "HU_accuracy", name)
 
 
@@ -778,10 +838,9 @@ def plot_uniformity_dose(by_position, tol=UNIFORMITY_TOLERANCE_PCT, y_range=None
         lo, hi = (max(-tol, -y_range), min(tol, y_range)) if y_range is not None else (-tol, tol)
         ax.axhspan(lo, hi, color="gray", alpha=0.15, zorder=0)
         ax.axhline(0, color="black", ls="--", lw=1.2, zorder=1)
-        ax.plot(g["doses"], g["PCCT"], "o-", color="tab:orange", label="PCCT", markersize=5,
-                markeredgecolor="black", markeredgewidth=0.8, zorder=5)
-        ax.plot(g["doses"], g["EID"], "s-", color="tab:blue", label="EICT", markersize=5,
-                markeredgecolor="black", markeredgewidth=0.8, zorder=5)
+        # same line style / true CTDIvol axis as all other dose plots (no ratio for U_i)
+        _draw_dose_lines(ax, g, "$U_i$ (%)", "", name, headroom=1.0, ratio=False, zero_floor=False,
+                        legend_loc="best")
         if y_range is not None:
             ax.set_ylim(-y_range, y_range)
         else:
@@ -797,35 +856,20 @@ def plot_uniformity_dose(by_position, tol=UNIFORMITY_TOLERANCE_PCT, y_range=None
 
 
 def _draw_nps_dose(ax, g):
-    """ΥNPS per CTDIvol group, PCCT vs. EICT."""
-    x = np.arange(len(g["doses"]), dtype=float)
-    for stype in ("PCCT", "EID"):
-        ok = [(xi, y) for xi, y in zip(x, g[stype]) if np.isfinite(y)]
-        if ok:
-            ax.plot(*zip(*ok), linestyle="--", marker="x", color=FAMILY[stype]["color"],
-                    markersize=5, label=FAMILY[stype]["label"])
-    ax.set_xticks(x); ax.set_xticklabels([f"{c:.2f}" for c in g["doses"]])
-    ax.set_xlabel("CTDIvol group (mGy)"); ax.set_ylabel("ΥNPS (HU)")
-    ax.set_title("ΥNPS vs. Dose: PCCT vs. EICT")
-    _style_legend(ax, headroom=1.2)
+    """ΥNPS per CTDIvol group, PCCT vs. EICT (line plot at the true CTDIvol, same style as all dose plots)."""
+    _draw_dose_lines(ax, g, "ΥNPS (HU)", "", "ΥNPS vs. Dose: PCCT vs. EICT", headroom=1.2, ratio=False,
+                    zero_floor=False, legend_loc="upper right")
     ax.grid(alpha=0.3)
 
 
 def plot_uniformity_center_hu_dose(g):
     """Centre HU of the CTP486 module per CTDIvol, PCCT vs. EICT (lines). Explains why the
     percentage U_i becomes larger for EICT: the denominator (centre + 100) decreases as the centre HU drops."""
-    x = np.arange(len(g["doses"]), dtype=float)
     fig, ax = _new_fig()
-    for stype in ("PCCT", "EID"):
-        ok = [(xi, y) for xi, y in zip(x, g[stype]) if np.isfinite(y)]
-        if ok:
-            ax.plot(*zip(*ok), linestyle="-" if stype == "PCCT" else "--", marker="o",
-                    color=FAMILY[stype]["color"], markersize=5, label=FAMILY[stype]["label"])
     ax.axhline(0, color="gray", ls=":", lw=1)
-    ax.set_xticks(x); ax.set_xticklabels([f"{c:.2f}" for c in g["doses"]], rotation=25, ha="right")
-    ax.set_xlabel("CTDIvol group (mGy)"); ax.set_ylabel("Center HU (CTP486)")
-    ax.set_title("CTP486 center HU vs. Dose")
-    _style_legend(ax, headroom=1.2)
+    # same line style / true CTDIvol axis as all other dose plots (no ratio for HU)
+    _draw_dose_lines(ax, g, "Center HU (CTP486)", "", "CTP486 center HU vs. Dose", headroom=1.2,
+                    ratio=False, zero_floor=False, legend_loc="upper right")
     ax.grid(alpha=0.3)
     _save(fig, "dose", "Uniformity_center_HU")
 
@@ -845,12 +889,13 @@ def _panel_letter(fig, i, y_top_in, H):
              ha="left", va="top", fontweight="bold", fontsize=PANEL_LABEL_SIZE)
 
 
-def _stacked_figure(draws, *name_parts):
+def _stacked_figure(draws, *name_parts, ncols=None):
     """Multi-panel figure; `draws` is a list of functions draw(ax), one per panel. Layout:
        1 panel  = one cell (full height)
        2 panels = side by side  (a left, b right)
        3 panels = a/b side by side at the top, c centred below
-       >=4      = stacked vertically (as before)
+       >=4      = stacked vertically, or – if ncols is given – a grid with ncols
+                  columns filled row by row (used for the 7 CNR-per-insert panels)
        All axes frames have EXACTLY the same size and the letters sit at the same place in their
        cell everywhere. Positions are computed in inches and set directly with add_axes."""
     n = len(draws)
@@ -858,6 +903,20 @@ def _stacked_figure(draws, *name_parts):
     m = MULTI_MARGINS_IN
     ax_w_in = W_cell - m["left"] - m["right"]
     ax_h_in = H_cell - m["bottom"] - m["top"]
+
+    if ncols and n >= 4:                                     # grid, row by row
+        rows = int(np.ceil(n / ncols))
+        W, H = W_cell * ncols, H_cell * rows
+        fig = Figure(figsize=(W, H))
+        for i, draw in enumerate(draws):
+            ox, oy = (i % ncols) * W_cell, (i // ncols) * H_cell
+            ax = fig.add_axes([(ox + m["left"]) / W, (H - (oy + H_cell) + m["bottom"]) / H,
+                               ax_w_in / W, ax_h_in / H])
+            draw(ax); ax.set_title("")
+            fig.text((ox + PANEL_LABEL_X_IN) / W, 1 - (oy + 0.03) / H, PANEL_LABEL_FMT.format(chr(97 + i)),
+                     ha="left", va="top", fontweight="bold", fontsize=PANEL_LABEL_SIZE)
+        _save(fig, *name_parts, size=(W, H), strip_titles=False)
+        return
 
     if n == 1 or n >= 4:
         W, H = W_cell, H_cell * n
@@ -983,6 +1042,24 @@ def build_multifigures(bundle):
             _guard("CNR_UpsilonNPS", lambda: _stacked_figure(
                 [lambda ax: _draw_cnr_dose(ax, g_c), lambda ax: _draw_nps_dose(ax, g_n)],
                 "dose", "Figure_CNR_UpsilonNPS"))
+        # CNR per insert (a–g, high-contrast inserts first) and per contrast group; only present in
+        # results that contain these entries (see QAPipeline.run_dose_series)
+        by_label = {d["label"]: d for d in items.get("cnr_dose", []) if d.get("label")}
+        order = [m for grp in CNR_GROUPS.values() for m in grp if m in by_label]
+        if order:
+            _guard("CNR_by_insert", lambda: _stacked_figure(
+                [(lambda ax, d=by_label[m], m=m: _draw_cnr_dose(ax, d["g"], m)) for m in order],
+                "dose", "Figure_CNR_by_insert", ncols=2))
+        grp = [k for k in CNR_GROUPS if k in by_label]
+        if grp:
+            _guard("CNR_groups", lambda: _stacked_figure(
+                [(lambda ax, d=by_label[k], k=k: _draw_cnr_dose(ax, d["g"], k, d.get("materials"))) for k in grp],
+                "dose", "Figure_CNR_groups"))
+            if items.get("nps_dose"):
+                g_n = items["nps_dose"][0]["g"]
+                _guard("CNR_groups_UpsilonNPS", lambda: _stacked_figure(
+                    [(lambda ax, d=by_label[k], k=k: _draw_cnr_dose(ax, d["g"], k, d.get("materials"))) for k in grp]
+                    + [lambda ax: _draw_nps_dose(ax, g_n)], "dose", "Figure_CNR_groups_UpsilonNPS"))
         if need("dprime", "dprime_dose"):
             by_mat = {d["material"]: d for d in items["dprime_dose"]}
             mats = [m for m in DPRIME_FIGURE_MATERIALS if m in by_mat]

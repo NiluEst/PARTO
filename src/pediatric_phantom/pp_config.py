@@ -93,9 +93,6 @@ class Config:
     EXCLUDE_LABEL          = ""    # no reference dataset any more -> exclude nothing
     COLOR_1                = "#378ADD"
     COLOR_2                = "#D85A30"
-    COLOR_RATIO            = "#5F5E5A"
-    RATIO_MAX_SUBPLOTS_SIDE = 2
-    BAR_WIDTH              = 0.35
 
     # Pairwise comparisons: datasets with column == val1 vs. column == val2;
     # "fixed_filters" keep the other parameters constant ("kernel_prefix" =
@@ -112,7 +109,6 @@ class Config:
             "title":  "Slice Thickness: 1 mm vs. 3 mm",
             "column": "slice_thickness_mm", "val1": "1.0", "val2": "3.0",
             "label1": "1 mm", "label2": "3 mm",
-            "ratio_invert": True,         
             "fixed_filters": {"kvp": "70", "kernel": "br40"},
             "fixed_filter_modes": {"kernel": "kernel_prefix"},
         },

@@ -314,6 +314,17 @@ class PlotBuilder:
         organs = cls.unique_organ_categories()
         plots = []
 
+        # Achieved mean CTDIvol per manufacturer and CTDIvol cluster key, used to draw each scanner
+        # at its achieved CTDIvol in the line plots.
+        ctdi_true = {}
+        for g, gr in present:
+            acc = {}
+            for r in gr:
+                v = PlotReader.to_float(r.get("ctdivol"))
+                if v is not None:
+                    acc.setdefault(ctdi_mapping.get(v, v), []).append(v)
+            ctdi_true[g["label"]] = {k: float(np.mean(v)) for k, v in acc.items()}
+
         # --- CNR per organ pair ---
         cnr_maps = {g["label"]: cls.build_ctdi_map(gr, "cnr", ctdi_mapping) for g, gr in present}
         keys_cnr = sorted({k for m in cnr_maps.values() for k in m.keys()})
@@ -327,6 +338,7 @@ class PlotBuilder:
                 "maps":         cnr_maps,
                 "ctdi_keys":    keys_cnr,
                 "multi":        True,
+                "ctdi_true":    ctdi_true,
             })
         else:
             print("    [Warning] No CTDIvol groups for CNR (3-way comparison).")
@@ -346,6 +358,7 @@ class PlotBuilder:
                 "multi":        True,
                 "per_organ":    True,
                 "organs":       list(organs.items()),
+                "ctdi_true":    ctdi_true,
             })
         else:
             print("    [Warning] No CTDIvol groups for SNR (3-way comparison).")
@@ -536,7 +549,17 @@ class PlotBuilder:
                         if v is not None]
             ctdi_mapping = cls.cluster_ctdi_values(raw_ctdis, Config.CTDI_TOLERANCE)
 
-          
+            # Achieved mean CTDIvol per group and CTDIvol cluster key, used to draw each group at its
+            # achieved CTDIvol in the line plots.
+            true1, true2 = {}, {}
+            for grp_rows, tgt in ((g1, true1), (g2, true2)):
+                for r in grp_rows:
+                    v = PlotReader.to_float(r.get("ctdivol"))
+                    if v is not None:
+                        tgt.setdefault(ctdi_mapping.get(v, v), []).append(v)
+            true1 = {k: float(np.mean(v)) for k, v in true1.items()}
+            true2 = {k: float(np.mean(v)) for k, v in true2.items()}
+
             print(f"    {comp['label1']}: {len(g1)}  |  {comp['label2']}: {len(g2)}")
 
             color1 = comp.get("color1")
@@ -559,6 +582,8 @@ class PlotBuilder:
                     "matches":    matches_cnr,
                     "color1":     color1,
                     "color2":     color2,
+                    "ctdi_true1": true1,
+                    "ctdi_true2": true2,
                 })
             else:
                 print("    [Warning] No CTDIvol pairs for CNR.")
@@ -582,6 +607,8 @@ class PlotBuilder:
                     "organs":     list(organs.items()),
                     "color1":     color1,
                     "color2":     color2,
+                    "ctdi_true1": true1,
+                    "ctdi_true2": true2,
                 })
             else:
                 print("    [Warning] No CTDIvol pairs for SNR.")
@@ -706,7 +733,7 @@ class FigureOfMeritBuilder:
 
     Per CTDIvol group and category (organ pair; single organ for FOM_SNR) the FOM
     values are grouped by comparison group (e.g. manufacturer, kernel) and drawn
-    as bars in pp_plots.py.
+    as line plots in pp_plots.py.
     Only the "Kernel" and "Manufacturer" comparisons are used for MTF plots;
     FOM plots are created for all Config.COMPARISONS.
     """
@@ -796,6 +823,16 @@ class FigureOfMeritBuilder:
                         if v is not None]
             ctdi_mapping = PlotBuilder.cluster_ctdi_values(raw_ctdis, Config.CTDI_TOLERANCE)
 
+            # Achieved mean CTDIvol per group and cluster key (for the line plots)
+            true1, true2 = {}, {}
+            for grp_rows, tgt in ((g1, true1), (g2, true2)):
+                for r in grp_rows:
+                    v = PlotReader.to_float(r.get("ctdivol"))
+                    if v is not None:
+                        tgt.setdefault(ctdi_mapping.get(v, v), []).append(v)
+            true1 = {k: float(np.mean(v)) for k, v in true1.items()}
+            true2 = {k: float(np.mean(v)) for k, v in true2.items()}
+
             # --- FOM_CNR: per organ pair (category) ---
             m1_cnr = cls.build_fom_ctdi_map(g1, "cnr", ctdi_mapping)
             m2_cnr = cls.build_fom_ctdi_map(g2, "cnr", ctdi_mapping)
@@ -812,6 +849,8 @@ class FigureOfMeritBuilder:
                     "map2":       m2_cnr,
                     "matches":    matches_cnr,
                     "is_fom":     True,
+                    "ctdi_true1": true1,
+                    "ctdi_true2": true2,
                 })
 
             # --- FOM_SNR: per SINGLE ORGAN, not per organ pair ---
@@ -832,6 +871,8 @@ class FigureOfMeritBuilder:
                     "is_fom":     True,
                     "per_organ":  True,
                     "organs":     list(organs.items()),
+                    "ctdi_true1": true1,
+                    "ctdi_true2": true2,
                 })
         return plots
     
@@ -858,6 +899,16 @@ class FigureOfMeritBuilder:
         organs = PlotBuilder.unique_organ_categories()
         plots = []
 
+        # Achieved mean CTDIvol per manufacturer and cluster key (for the line plots)
+        ctdi_true = {}
+        for g, gr in present:
+            acc = {}
+            for r in gr:
+                v = PlotReader.to_float(r.get("ctdivol"))
+                if v is not None:
+                    acc.setdefault(ctdi_mapping.get(v, v), []).append(v)
+            ctdi_true[g["label"]] = {k: float(np.mean(v)) for k, v in acc.items()}
+
         cnr_maps = {g["label"]: cls.build_fom_ctdi_map(gr, "cnr", ctdi_mapping) for g, gr in present}
         keys_cnr = sorted({k for m in cnr_maps.values() for k in m.keys()})
         if keys_cnr:
@@ -866,6 +917,7 @@ class FigureOfMeritBuilder:
                 "title": f"FOM | {comp['title']}  |  CNR", "comp_title": comp["title"],
                 "metric": "cnr", "group_labels": [g["label"] for g, _ in present],
                 "maps": cnr_maps, "ctdi_keys": keys_cnr, "multi": True, "is_fom": True,
+                "ctdi_true": ctdi_true,
             })
 
         snr_maps = {g["label"]: cls.build_organ_fom_snr_ctdi_map(gr, organs, ctdi_mapping) for g, gr in present}
@@ -876,7 +928,7 @@ class FigureOfMeritBuilder:
                 "title": f"FOM | {comp['title']}  |  SNR", "comp_title": comp["title"],
                 "metric": "snr", "group_labels": [g["label"] for g, _ in present],
                 "maps": snr_maps, "ctdi_keys": keys_snr, "multi": True, "is_fom": True,
-                "per_organ": True, "organs": list(organs.items()),
+                "per_organ": True, "organs": list(organs.items()), "ctdi_true": ctdi_true,
             })
         return plots
 

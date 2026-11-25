@@ -7,7 +7,10 @@ Arial, one font size, fixed figure size -> panels can be combined in Inkscape.
 
 In addition to the single plots, multi-panel figures are drawn:
   - scanner comparison: a = CNR, b = FOM_CNR (organ pair liver – autochthonous muscle);
-  - PCCT parameter comparison: a = tube voltage, b = slice thickness, c = kernel.
+  - parameter comparison (PCCT and EICT): a = tube voltage, b = slice thickness, c = kernel;
+  - PCCT vs. EICT parameter comparison (both scanners per panel) in PLOTS_DIR/param_PCCT_vs_EICT.
+All dose-dependent comparisons are line plots: every group/scanner is drawn at its achieved
+CTDIvol, and grey bands mark the CTDIvol values of one dose level (labelled with their mean).
 
 Pipeline position: pp_compute.py computes the results, builds the plot-data dicts
 in pp_plotdata.py (PlotBuilder / FigureOfMeritBuilder / CombinedReproBuilder) and
@@ -39,6 +42,7 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from matplotlib.ticker import FixedLocator, NullLocator
 
 try:
     import pp_paths as paths
@@ -59,11 +63,9 @@ MULTI_MARGINS_IN = dict(left=0.95, right=0.15, bottom=0.66, top=0.34)   # inches
 PANEL_LABEL_FMT = "{}"      # "{}" -> a, b   |   "({})" -> (a), (b)
 PANEL_LABEL_SIZE = 18
 PANEL_LABEL_X_IN = 0.03
-RATIO_CAP_WIDTH = 0.25      # width of the end caps of the ratio brackets
 
 COLOR_1 = Config.COLOR_1    # group 1 (e.g. PCCT / Br40 / 1 mm ...)
 COLOR_2 = Config.COLOR_2    # group 2
-COLOR_RATIO = "red"
 
 plt.rcParams.update({
     "svg.fonttype": "none",
@@ -165,104 +167,147 @@ def _avg_std(lst):
     return float(np.mean(arr)), float(np.std(arr)), int(arr.size)
 
 
-def _ratio_bracket(ax, x_dim, lo, hi, ratio, x_text):
-    """Black dimension bracket from lo to hi at x_dim + red ratio label (×r) above it at x_text."""
-    ax.annotate("", xy=(x_dim, hi), xytext=(x_dim, lo),
-                arrowprops=dict(arrowstyle=f"|-|,widthA={RATIO_CAP_WIDTH},widthB={RATIO_CAP_WIDTH}",
-                                color="black", lw=1.2, shrinkA=0, shrinkB=0), zorder=3)
-    if ratio is not None and np.isfinite(ratio):
-        ax.annotate(f"×{ratio:.2f}", xy=(x_text, hi), xytext=(0, 3), textcoords="offset points",
-                    ha="center", va="bottom", color=COLOR_RATIO, fontweight="bold")
-
-
 # ══════════════════════════════════════════════════════════════════
 # DRAWING BUILDING BLOCKS (each draws onto ONE given axis)
 # ══════════════════════════════════════════════════════════════════
-def _draw_pairwise_bars(ax, d, cat_key, cat_title, variability=False):
-    """Two groups (label1/label2) per CTDIvol level, optionally with error bars (± std
-    if variability=True); a ratio bracket shows group1 / group2 per level."""
+def _draw_pairwise_lines(ax, d, cat_key, cat_title, variability=False, d2=None,
+                         scanner_labels=("PCCT", "EICT")):
+    """Two groups (label1/label2) per CTDIvol level as line plot, optionally with error bars
+    (± std if variability=True).
+
+    Each group is drawn at its achieved mean CTDIvol (d["ctdi_true1"] / d["ctdi_true2"]; if these keys
+    are missing, the mean CTDIvol of the level is used for both groups). A light grey band marks which
+    CTDIvol values form one level; the level means are the tick labels. The axis is linear for a narrow
+    dose range (max/min <= 5) and logarithmic otherwise (same rule as in tp_plots).
+
+    d2: plot-data dict of the SAME comparison from a second scanner. Then colour = scanner
+    (scanner_labels[0] orange, scanner_labels[1] blue), solid line = label1, dashed line = label2.
+    """
     metric = ("FOM_" + d["metric"].upper()) if d.get("is_fom") else d["metric"].upper()
-    color1 = d.get("color1") or COLOR_1
-    color2 = d.get("color2") or COLOR_2
-    w = Config.BAR_WIDTH
-    x = np.arange(len(d["matches"]))
-    inv = next((c.get("ratio_invert", False) for c in Config.COMPARISONS
-            if c["title"] == d.get("comp_title")), False)
-    v1, v2, e1, e2, ratios, labels, ns = [], [], [], [], [], [], []
-    for ctdi_disp, k1, k2 in d["matches"]:
-        if variability:
-            a1, s1, n1 = _avg_std(d["map1"].get(k1, {}).get(cat_key, []))
-            a2, s2, n2 = _avg_std(d["map2"].get(k2, {}).get(cat_key, []))
-            ns.append((n1, n2))
-        else:
-            a1 = _avg(d["map1"].get(k1, {}).get(cat_key, []))
-            a2 = _avg(d["map2"].get(k2, {}).get(cat_key, []))
-            s1 = s2 = 0.0
-        v1.append(a1); v2.append(a2); e1.append(s1 or 0.0); e2.append(s2 or 0.0)
-        if a1 is None or a2 is None or not (a2 if not inv else a1):
-            ratios.append(None)
-        else:
-            ratios.append(a2 / a1 if inv else a1 / a2)
-        labels.append(f"{ctdi_disp:.2f}")
+    combined = d2 is not None
+    sets = [d, d2] if combined else [d]
+    scan_colors = ("tab:orange", "tab:blue")
     err = dict(ecolor="black", elinewidth=1.1, capthick=1.1, capsize=3)
-    ax.bar(x - w / 2, [v or 0 for v in v1], width=w, label=d["label1"], color=color1,
-           alpha=0.9, zorder=2, yerr=e1 if (variability and any(e1)) else None, error_kw=err)
-    ax.bar(x + w / 2, [v or 0 for v in v2], width=w, label=d["label2"], color=color2,
-           alpha=0.9, zorder=2, yerr=e2 if (variability and any(e2)) else None, error_kw=err)
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"{l} mGy" for l in labels], rotation=30, ha="right")
+    per_set, all_x, tops = [], [], []
+    for dd in sets:
+        t1, t2 = dd.get("ctdi_true1", {}), dd.get("ctdi_true2", {})
+        rows = []
+        for ctdi_disp, k1, k2 in dd["matches"]:
+            if variability:
+                a1, s1, _ = _avg_std(dd["map1"].get(k1, {}).get(cat_key, []))
+                a2, s2, _ = _avg_std(dd["map2"].get(k2, {}).get(cat_key, []))
+            else:
+                a1 = _avg(dd["map1"].get(k1, {}).get(cat_key, []))
+                a2 = _avg(dd["map2"].get(k2, {}).get(cat_key, []))
+                s1 = s2 = 0.0
+            rows.append({"disp": ctdi_disp, "x": (t1.get(k1, ctdi_disp), t2.get(k2, ctdi_disp)),
+                         "y": (a1, a2), "e": (s1 or 0.0, s2 or 0.0)})
+            all_x += [ctdi_disp, t1.get(k1, ctdi_disp), t2.get(k2, ctdi_disp)]
+            tops += [a + e for a, e in ((a1, s1 or 0.0), (a2, s2 or 0.0)) if a is not None]
+        per_set.append(rows)
+    all_x = np.asarray(all_x, float)
+    log_x = all_x.max() / all_x.min() > 5.0
+    span = all_x.max() - all_x.min()
+
+    for si, (dd, rows) in enumerate(zip(sets, per_set)):
+        for r in rows:                              # grey band = one CTDIvol level
+            lo, hi = min(r["x"]), max(r["x"])
+            if log_x:
+                ax.axvspan(lo / 1.04, hi * 1.04, color="0.92", lw=0, zorder=0)
+            else:
+                ax.axvspan(lo - 0.015 * span, hi + 0.015 * span, color="0.92", lw=0, zorder=0)
+        for gi in (0, 1):                           # one line per group (label1 / label2)
+            pts = [(r["x"][gi], r["y"][gi], r["e"][gi]) for r in rows if r["y"][gi] is not None]
+            if not pts:
+                continue
+            x, y, e = (list(t) for t in zip(*pts))
+            if combined:
+                color, ls = scan_colors[si], ("-" if gi == 0 else "--")
+            else:
+                color = (dd.get("color1") or COLOR_1) if gi == 0 else (dd.get("color2") or COLOR_2)
+                ls = "-"
+            ax.errorbar(x, y, yerr=e if (variability and any(e)) else None, color=color, ls=ls,
+                        marker="o" if gi == 0 else "s", markersize=5, lw=1.6, zorder=4,
+                        **(err if variability else {}))
+
+    if log_x:
+        ax.set_xscale("log")
+        ax.set_xlim(all_x.min() / 1.25, all_x.max() * 1.25)
+    else:
+        ax.set_xlim(all_x.min() - 0.1 * span, all_x.max() + 0.1 * span)
+    ticks = sorted({round(r["disp"], 2) for r in per_set[0]})          # level means (first scanner)
+    ax.xaxis.set_major_locator(FixedLocator(ticks))
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.set_xticklabels([f"{t:.2f}" for t in ticks], rotation=45, ha="right")
     ax.set_ylabel(metric); ax.set_xlabel("CTDIvol (mGy)")
-    tops = [(v or 0) + e for v, e in zip(v1 + v2, e1 + e2)] or [1]
-    max_val = max(tops)
-    ax.set_ylim(0, max_val * 1.55)
+    ax.set_ylim(0, (max(tops) if tops else 1) * (1.6 if combined else 1.45))
     ax.grid(axis="y", alpha=0.25, zorder=0)
     ax.spines["top"].set_visible(False)
-    off = w + 0.12
-    for xi, a, b, r in zip(x, v1, v2, ratios):
-        if a is None or b is None:
-            continue
-        x_dim = xi + off
-        ax.plot([xi - w / 2, x_dim], [a, a], color="black", lw=0.7, ls=(0, (3, 2)), zorder=1.5)
-        ax.plot([xi + w / 2, x_dim], [b, b], color="black", lw=0.7, ls=(0, (3, 2)), zorder=1.5)
-        _ratio_bracket(ax, x_dim, min(a, b), max(a, b), r, xi)
-    ax.set_xlim(-w - 0.2, len(x) - 1 + off + 0.3)
-    _legend(ax, headroom=1.0, loc="upper left", bbox_to_anchor=(0.0, 1.0),
-            handles=[patches.Patch(color=color1, label=d["label1"]),
-                     patches.Patch(color=color2, label=d["label2"])])
+    if combined:
+        handles = [Line2D([], [], color=scan_colors[i], lw=1.6, label=scanner_labels[i]) for i in (0, 1)]
+        handles += [Line2D([], [], color="black", lw=1.4, ls="-", marker="o", ms=5, label=d["label1"]),
+                    Line2D([], [], color="black", lw=1.4, ls="--", marker="s", ms=5, label=d["label2"])]
+        _legend(ax, headroom=1.0, loc="upper left", bbox_to_anchor=(0.0, 1.0), ncol=2, handles=handles,
+                handlelength=2.2, columnspacing=1.0)
+    else:
+        color1 = d.get("color1") or COLOR_1
+        color2 = d.get("color2") or COLOR_2
+        _legend(ax, headroom=1.0, loc="upper left", bbox_to_anchor=(0.0, 1.0),
+                handles=[Line2D([], [], color=color1, lw=1.6, marker="o", ms=5, label=d["label1"]),
+                         Line2D([], [], color=color2, lw=1.6, marker="s", ms=5, label=d["label2"])])
 
 
-def _draw_multi_group_bars(ax, d, cat_key, ylabel=None):
-    """N (usually 3) groups per CTDIvol level (manufacturer comparison); values printed above the bars."""
+def _draw_multi_group_lines(ax, d, cat_key, ylabel=None):
+    """N (usually 3) groups per CTDIvol level (manufacturer comparison) as line plot.
+
+    Each manufacturer is drawn at its achieved mean CTDIvol (d["ctdi_true"]; if the key is missing,
+    the level mean is used); a light grey band marks which CTDIvol values form one level, the level
+    means are the tick labels. The first group is drawn in orange and the second in blue (same colours
+    as PCCT / EICT in all other plots). Axis rule as in _draw_pairwise_lines.
+    """
     metric = ylabel or (("FOM_" + d["metric"].upper()) if d.get("is_fom") else d["metric"].upper())
     labels = d["group_labels"]
     n = len(labels)
     colors = _distinct_colors(n)
+    if n >= 2:
+        colors[0], colors[1] = colors[1], colors[0]
+    markers = ["o", "s", "^", "D", "v", "P"]
     keys = d["ctdi_keys"]
-    x = np.arange(len(keys))
-    bw = min(Config.BAR_WIDTH, 0.8 / max(1, n))
-    all_vals = []
+    truth = d.get("ctdi_true", {})
+    vals = {lab: [_avg(d["maps"][lab].get(k, {}).get(cat_key, [])) for k in keys] for lab in labels}
+    xs = {lab: [truth.get(lab, {}).get(k, k) for k in keys] for lab in labels}
+    all_x = np.asarray([k for k in keys] + [x for lab in labels for x in xs[lab]], float)
+    log_x = all_x.max() / all_x.min() > 5.0
+    span = all_x.max() - all_x.min()
+    all_vals = [v for lab in labels for v in vals[lab] if v is not None]
+    for i, k in enumerate(keys):                    # grey band = one CTDIvol level
+        xi = [xs[lab][i] for lab in labels if vals[lab][i] is not None] or [k]
+        if log_x:
+            ax.axvspan(min(xi) / 1.04, max(xi) * 1.04, color="0.92", lw=0, zorder=0)
+        else:
+            ax.axvspan(min(xi) - 0.015 * span, max(xi) + 0.015 * span, color="0.92", lw=0, zorder=0)
     for gi, lab in enumerate(labels):
-        gmap = d["maps"][lab]
-        vals = [_avg(gmap.get(k, {}).get(cat_key, [])) for k in keys]
-        all_vals += [v for v in vals if v is not None]
-        off = (gi - n / 2.0 + 0.5) * bw
-        ax.bar(x + off, [v or 0 for v in vals], width=bw, color=colors[gi], alpha=0.9,
-               zorder=2, label=lab)
-        for xi, v in zip(x + off, vals):          # value above the bar, in the bar colour
-            if v is None:
-                continue
-            ax.annotate(f"{v:.2f}", (xi, v), xytext=(0, 2), textcoords="offset points",
-                        ha="center", va="bottom", rotation=90,
-                        fontsize=FONT_SIZE - 4, fontweight="bold",
-                        color=colors[gi], zorder=3)
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"{k:.2f} mGy" for k in keys], rotation=30, ha="right")
+        pts = [(x, v) for x, v in zip(xs[lab], vals[lab]) if v is not None]
+        if pts:
+            ax.plot(*zip(*pts), color=colors[gi], marker=markers[gi % len(markers)], markersize=5,
+                    lw=1.6, zorder=4, label=lab)
+    if log_x:
+        ax.set_xscale("log")
+        ax.set_xlim(all_x.min() / 1.25, all_x.max() * 1.25)
+    else:
+        ax.set_xlim(all_x.min() - 0.1 * span, all_x.max() + 0.1 * span)
+    ax.xaxis.set_major_locator(FixedLocator(keys))
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.set_xticklabels([f"{k:.2f}" for k in keys], rotation=45, ha="right")
     ax.set_ylabel(metric); ax.set_xlabel("CTDIvol (mGy)")
-    ax.set_ylim(0, (max(all_vals) if all_vals else 1) * 1.3)
+    ax.set_ylim(0, (max(all_vals) if all_vals else 1) * 1.6)
     ax.grid(axis="y", alpha=0.25, zorder=0)
     ax.spines["top"].set_visible(False)
-    _legend(ax, headroom=1.0, title="Manufacturer",
-            handles=[patches.Patch(color=colors[i], label=labels[i]) for i in range(n)])
+    # legend on the side where the curves are lower (left for rising, right for falling curves)
+    first = max((vals[lab][0] or 0) for lab in labels); last = max((vals[lab][-1] or 0) for lab in labels)
+    _legend(ax, headroom=1.0, loc="upper left" if last >= first else "upper right", title="Manufacturer",
+            handles=[Line2D([], [], color=colors[i], marker=markers[i % len(markers)], ms=5, lw=1.6,
+                            label=labels[i]) for i in range(n)])
 
 
 def _draw_boxplot(ax, m, ctdi_keys, cat_key, metric, color):
@@ -322,7 +367,7 @@ def _draw_pairwise_catplots(d, prefix, variability=False):
         if not has:
             continue
         fig, ax = _new_fig()
-        _draw_pairwise_bars(ax, d, cat_key, cat_title, variability=variability)
+        _draw_pairwise_lines(ax, d, cat_key, cat_title, variability=variability)
         _save(fig, prefix, _comp_slug(d["comp_title"]), _tag(d), cat_key)
 
 
@@ -334,14 +379,14 @@ def _draw_multi_catplots(d, prefix):
         if not has:
             continue
         fig, ax = _new_fig()
-        _draw_multi_group_bars(ax, d, cat_key)
+        _draw_multi_group_lines(ax, d, cat_key)
         _save(fig, prefix, "3way", _tag(d), cat_key)
 
 
 def _draw_multi_single_cat(d, prefix):
     """Multi-group bar plot for the single category d["cat_key"]."""
     fig, ax = _new_fig()
-    _draw_multi_group_bars(ax, d, d["cat_key"])
+    _draw_multi_group_lines(ax, d, d["cat_key"])
     _save(fig, prefix, "3way", _tag(d), d["cat_key"])
 
 
@@ -455,11 +500,14 @@ def _stacked_figure(draws, *name_parts):
     _save(fig, *name_parts, size=(W, H))
 
 
-def build_parameter_multipanel(plots, prefix, cat_key="liver_muscle"):
+def build_parameter_multipanel(plots, prefix, cat_key="liver_muscle", plots2=None,
+                               scanner_labels=("PCCT", "EICT")):
     """Parameter comparison: one multi-panel figure for ONE organ pair with
     a = Tube Voltage (70 vs 120 kV), b = Slice Thickness (1 vs 3 mm), c = Kernel (Br40 vs Br64).
     Uses the existing pairwise CNR plot data (metric='cnr', not per_organ, not FOM).
-    Skipped (with a message) if one of the three comparisons has no data."""
+    Skipped (with a message) if one of the three comparisons has no data.
+    plots2: plot data of the same parameter comparison from a second scanner (e.g. param_EICT);
+    then both scanners are drawn in each panel (see _draw_pairwise_lines, argument d2)."""
     # Resolve the category robustly (fallback: first liver–muscle pair, else first category)
     cats = dict(PlotBuilder.category_info())
     if cat_key not in cats:
@@ -472,8 +520,8 @@ def build_parameter_multipanel(plots, prefix, cat_key="liver_muscle"):
     # Panel order; first element = keyword searched for in comp_title, second = display name only
     wanted = [("Tube Voltage", "kVp"), ("Slice Thickness", "Slice thickness"), ("Kernel", "Kernel")]
 
-    def _find(keyword):
-        for d in plots:
+    def _find(keyword, source=None):
+        for d in (plots if source is None else source):
             if (d.get("metric") == "cnr" and not d.get("per_organ")
                     and not d.get("is_fom") and "matches" in d
                     and keyword.lower() in str(d.get("comp_title", "")).lower()):
@@ -494,7 +542,16 @@ def build_parameter_multipanel(plots, prefix, cat_key="liver_muscle"):
         print(f"  Parameter multi-panel skipped – missing data: {', '.join(missing)}")
         return
 
-    draws = [(lambda ax, dd=dd: _draw_pairwise_bars(ax, dd, cat_key, cat_title)) for dd in panels]
+    if plots2 is None:
+        draws = [(lambda ax, dd=dd: _draw_pairwise_lines(ax, dd, cat_key, cat_title)) for dd in panels]
+    else:
+        panels2 = [_find(keyword, plots2) for keyword, _name in wanted]
+        if any(p is None for p in panels2):
+            print("  Parameter multi-panel (two scanners) skipped – second scanner has missing data.")
+            return
+        draws = [(lambda ax, dd=dd, dd2=dd2: _draw_pairwise_lines(ax, dd, cat_key, cat_title, d2=dd2,
+                                                                 scanner_labels=scanner_labels))
+                 for dd, dd2 in zip(panels, panels2)]
     _stacked_figure(draws, prefix, "Figure_kVp_Thickness_Kernel", cat_title)
     print(f"  Parameter multi-panel created: {cat_title} (a=kVp, b=slice thickness, c=kernel)")
 
@@ -530,8 +587,8 @@ def build_scanner_multipanel(cnr_plots, fom_plots, prefix,
         print(f"  Multi-panel skipped – no data for category '{cat_title}'.")
         return
     _stacked_figure(
-        [lambda ax: _draw_multi_group_bars(ax, cnr_d, cat_key),
-         lambda ax: _draw_multi_group_bars(ax, fom_d, cat_key, ylabel="FOM_CNR")],
+        [lambda ax: _draw_multi_group_lines(ax, cnr_d, cat_key),
+         lambda ax: _draw_multi_group_lines(ax, fom_d, cat_key, ylabel="FOM_CNR")],
         prefix, "Figure_CNR_FOMCNR", cat_title)
     print(f"  Multi-panel created: {cat_title} (a=CNR, b=FOM_CNR)")
 
@@ -576,7 +633,9 @@ def render(plots, out_dir, prefix=""):
 # ══════════════════════════════════════════════════════════════════
 def render_task(name, plots):
     """Draws all single plots of a task into paths.PLOTS_DIR/<name>, exports the plot values
-    as CSV and – for "param_PCCT" and "scanner_comparison" – the multi-panel figure."""
+    as CSV and – for "param_PCCT", "param_EICT" and "scanner_comparison" – the multi-panel figure.
+    For the parameter comparisons, a PCCT vs. EICT multi-panel figure is additionally drawn into
+    paths.PLOTS_DIR/param_PCCT_vs_EICT if saved results (.pkl) of the other scanner exist."""
     global _OUT_DIR
     out = paths.PLOTS_DIR / name
     render(plots, out, prefix=name)
@@ -585,8 +644,19 @@ def render_task(name, plots):
         PlotValueExporter.export(plots, name, paths.CSV_DIR / f"plot_values_{name}.csv")
     except Exception as ex:
         print(f"  [Note] CSV of plot values not written: {ex}")
-    if name == "param_PCCT":                       # a=kVp, b=slice thickness, c=kernel
+    if name in ("param_PCCT", "param_EICT"):       # a=kVp, b=slice thickness, c=kernel
         build_parameter_multipanel(plots, prefix=name, cat_key="liver_muscle")
+        # PCCT and EICT in one figure, using the newest saved results of the other scanner (if any)
+        other = "param_EICT" if name == "param_PCCT" else "param_PCCT"
+        f_other = _newest_pkl(other)
+        if f_other:
+            with open(f_other, "rb") as fh:
+                other_plots = pickle.load(fh)["plots"]
+            pcct, eict = (plots, other_plots) if name == "param_PCCT" else (other_plots, plots)
+            _OUT_DIR = str(paths.PLOTS_DIR / "param_PCCT_vs_EICT")
+            os.makedirs(_OUT_DIR, exist_ok=True)
+            build_parameter_multipanel(pcct, prefix="param_PCCT_vs_EICT", cat_key="liver_muscle", plots2=eict)
+            _OUT_DIR = str(out)
     elif name == "scanner_comparison":             # a=CNR, b=FOM_CNR
         cnr = [d for d in plots if not d.get("is_fom")]
         fom = [d for d in plots if d.get("is_fom")]

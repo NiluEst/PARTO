@@ -19,25 +19,34 @@ from tp_helpers import _cluster_by_tolerance, _kernel_group
 def dose_groups(entries, tol=DOSE_TOLERANCE_MGY):
     """Group values by dose and average them per scanner type.
 
-    entries: [(ctdivol, scanner_type, value)] -> {"doses", "PCCT", "EID"}.
+    entries: [(ctdivol, scanner_type, value)] -> {"doses", "PCCT", "EID", "dose_PCCT", "dose_EID"}.
     "doses" holds the mean CTDIvol of each dose cluster (sorted); "PCCT"/"EID" hold the mean value
     of that scanner type in each cluster (NaN if the type has no entry in a cluster).
+    "dose_PCCT"/"dose_EID" hold the achieved mean CTDIvol of that scanner type in each cluster, so
+    that every scanner can be plotted at its achieved CTDIvol (the plots fall back to "doses" if
+    these keys are missing).
     """
     clusters = _cluster_by_tolerance([e[0] for e in entries], tol)
     groups = {}
+    true_dose = {}                                   # cluster key -> {scanner type: [CTDIvol, ...]}
     for cluster in clusters:
         lo, hi = min(cluster), max(cluster)
         key = float(np.mean(cluster))
         groups[key] = {}
+        true_dose[key] = {}
         for ctdi, stype, v in entries:
             if lo - 1e-9 <= ctdi <= hi + 1e-9:
                 groups[key].setdefault(stype, []).append(v)
+                true_dose[key].setdefault(stype, []).append(ctdi)
         for stype in list(groups[key].keys()):
             groups[key][stype] = float(np.mean(groups[key][stype]))
+            true_dose[key][stype] = float(np.mean(true_dose[key][stype]))
     doses = sorted(groups.keys())
     return {"doses": doses,
             "PCCT": [groups[d].get("PCCT", np.nan) for d in doses],
-            "EID": [groups[d].get("EID", np.nan) for d in doses]}
+            "EID": [groups[d].get("EID", np.nan) for d in doses],
+            "dose_PCCT": [true_dose[d].get("PCCT", np.nan) for d in doses],
+            "dose_EID": [true_dose[d].get("EID", np.nan) for d in doses]}
 
 
 def cnr_dose(results, material_subset=None, tol=DOSE_TOLERANCE_MGY):

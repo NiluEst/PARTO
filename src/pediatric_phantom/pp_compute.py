@@ -403,11 +403,17 @@ def run_plots_from_csv(csv_file, task="param_PCCT"):
     parameter comparison plots ("param_PCCT" / "param_EICT", default "param_PCCT").
     """
     rows = PlotReader.filter_rows(PlotReader.read_csv(csv_file))
+    # The plot data are also saved as .pkl (as in the full computation), so that pp_plots.py and the
+    # PCCT vs. EICT parameter figure (which reads the newest .pkl of the other scanner) use them.
     if task.startswith("scanner"):
         cnr_plots, fom_plots = _scanner_plots(rows)
+        _save_pkl("scanner_comparison", {"task": "scanner_comparison", "plots": cnr_plots + fom_plots})
         pp_plots.render_task("scanner_comparison", cnr_plots + fom_plots)
     else:
-        pp_plots.render_task(task if task.startswith("param_") else "param_PCCT", _parameter_plots(rows))
+        name = task if task.startswith("param_") else "param_PCCT"
+        plots = _parameter_plots(rows)
+        _save_pkl(name, {"task": name, "plots": plots})
+        pp_plots.render_task(name, plots)
 
 
 # ══════════════════════════════════════════════════════════════════

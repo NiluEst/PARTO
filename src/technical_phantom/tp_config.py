@@ -28,6 +28,14 @@ NOMINAL_HU = {
     "Acrylic": 120.0, "Delrin": 340.0, "Teflon": 990.0,
 }
 
+# Contrast groups for the dose-series CNR plots (in addition to the mean over all inserts):
+# split by nominal CT number – Air and Teflon differ by ~1000 HU from the background,
+# all other inserts lie between -200 and +340 HU.
+CNR_GROUPS = {
+    "High": ["Air", "Teflon"],
+    "Low": ["PMP", "LDPE", "Polystyrene", "Acrylic", "Delrin"],
+}
+
 # HU-accuracy reference table (baseline, lower/upper limit in HU) per material
 HU_ACCURACY_LIMITS = {
     "Air":         {"baseline": -1020.0, "lower": -1070.0, "upper": -970.0},
